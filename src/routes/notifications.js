@@ -40,21 +40,59 @@ function enqueueMany(userIds, type, payload = {}) {
 }
 
 /**
- * 指定ユーザー宛ての 'review_request' を REVIEW_DELAY_MS 後にキューへ追加する。
- * setTimeout はプロセスの終了を妨げないよう unref する。
+ * 指定ユーザー宛ての 'review_request' を即座にDBへ保存する。
+ * scheduled_at に「現在時刻 + REVIEW_DELAY_MS」を設定し、配信予定とする。
+ * （setTimeout に依存しないためサーバー再起動でも失われない）
+ * @returns 追加した通知IDの配列
  */
-function scheduleReviewRequest(userIds, payload = {}) {
+function enqueueReviewRequest(userIds, payload = {}) {
   const targets = userIds.filter(Boolean);
-  const timer = setTimeout(() => {
-    try {
-      for (const uid of targets) enqueue(uid, 'review_request', payload);
-      console.log(`[notifications] scheduled review_request enqueued for ${targets.length} user(s)`);
-    } catch (err) {
-      console.error('[notifications] failed to enqueue scheduled review_request', err);
+  const delaySeconds = Math.max(0, Math.round(REVIEW_DELAY_MS / 1000));
+  const modifier = `+${delaySeconds} seconds`;
+  const stmt = db.prepare(`
+    INSERT INTO notifications (id, user_id, type, payload, scheduled_at)
+    VALUES (?, ?, 'review_request', ?, datetime('now', ?))
+  `);
+  const ids = [];
+  db.transaction(() => {
+    for (const uid of targets) {
+      const id = uuidv4();
+      stmt.run(id, uid, JSON.stringify(payload ?? {}), modifier);
+      ids.push(id);
     }
-  }, REVIEW_DELAY_MS);
-  if (typeof timer.unref === 'function') timer.unref();
-  return timer;
+  })();
+  return ids;
+}
+
+/**
+ * 未送信かつ scheduled_at が過去（配信時刻を過ぎた）review_request を
+ * 送信済み（is_sent = 1）にするスイープ処理。
+ * @returns 送信済みにした件数
+ */
+function sweepReviewRequests() {
+  const res = db.prepare(`
+    UPDATE notifications
+      SET is_sent = 1
+      WHERE type = 'review_request'
+        AND is_sent = 0
+        AND scheduled_at IS NOT NULL
+        AND scheduled_at <= datetime('now')
+  `).run();
+  if (res.changes > 0) {
+    console.log(`[notifications] swept ${res.changes} due review_request(s)`);
+  }
+  return res.changes;
+}
+
+/**
+ * 起動時に1回スイープし、その後 1分ごとに繰り返す。
+ * interval はプロセス終了を妨げないよう unref する。
+ */
+function startSweep() {
+  sweepReviewRequests();
+  const interval = setInterval(sweepReviewRequests, 60 * 1000);
+  if (typeof interval.unref === 'function') interval.unref();
+  return interval;
 }
 
 /**
@@ -68,6 +106,7 @@ router.get('/:user_id', (req, res) => {
     const rows = db.prepare(`
       SELECT * FROM notifications
         WHERE user_id = ? AND is_sent = 0
+          AND (scheduled_at IS NULL OR scheduled_at <= datetime('now'))
         ORDER BY created_at ASC, rowid ASC
     `).all(userId);
 
@@ -96,4 +135,12 @@ router.post('/reminder', (req, res) => {
   res.status(201).json({ ...row, payload: safeParse(row.payload) });
 });
 
-module.exports = { router, enqueue, enqueueMany, scheduleReviewRequest, TYPES };
+module.exports = {
+  router,
+  enqueue,
+  enqueueMany,
+  enqueueReviewRequest,
+  sweepReviewRequests,
+  startSweep,
+  TYPES,
+};

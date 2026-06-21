@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS notifications (
                                         -- / 'confirmation' / 'reminder' / 'review_request'
   payload    TEXT,                      -- 通知内容（JSON）
   is_sent    INTEGER DEFAULT 0,         -- 0 = 未送信, 1 = 送信済み
+  scheduled_at DATETIME,                -- 配信予定時刻（NULL = 即時配信）
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

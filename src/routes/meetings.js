@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
-const { enqueueMany, scheduleReviewRequest } = require('./notifications');
+const { enqueueMany, enqueueReviewRequest } = require('./notifications');
 
 const router = express.Router();
 
@@ -63,8 +63,8 @@ router.post('/:id/confirm', (req, res) => {
       const payload = { match_id: match.id, meeting_id: updated.id };
       // 両者へ 'confirmation' 通知
       enqueueMany(both, 'confirmation', payload);
-      // 60分後に両者へ 'review_request' をスケジュール
-      scheduleReviewRequest(both, payload);
+      // 60分後に両者へ 'review_request'（即DB保存・scheduled_at付き）
+      enqueueReviewRequest(both, payload);
     }
   }
 
