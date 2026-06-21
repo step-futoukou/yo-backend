@@ -4,6 +4,7 @@ const cors = require('cors');
 const { router: usersRouter } = require('./routes/users');
 const { router: matchingRouter } = require('./routes/matching');
 const { router: meetingsRouter } = require('./routes/meetings');
+const { router: notificationsRouter } = require('./routes/notifications');
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get('/health', (req, res) => {
 app.use('/api/users', usersRouter);
 app.use('/api/matching', matchingRouter);
 app.use('/api/meetings', meetingsRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // 404
 app.use((req, res) => {

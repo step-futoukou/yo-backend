@@ -2,6 +2,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
 const { getUserWithTags } = require('./users');
+const { enqueue } = require('./notifications');
 
 const router = express.Router();
 
@@ -172,6 +173,13 @@ router.post('/find', (req, res) => {
     INSERT INTO matches (id, user_a_id, user_b_id, score, status)
     VALUES (?, ?, ?, ?, 'pending')
   `).run(matchId, user_id, best.user.id, best.score);
+
+  // マッチ相手へ 'match_found' 通知を追加
+  enqueue(best.user.id, 'match_found', {
+    match_id: matchId,
+    from_user_id: user_id,
+    score: best.score,
+  });
 
   res.status(201).json({
     match: db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId),

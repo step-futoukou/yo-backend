@@ -79,9 +79,21 @@ CREATE TABLE IF NOT EXISTS blacklist (
   created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 通知キュー ---------------------------------------------------
+CREATE TABLE IF NOT EXISTS notifications (
+  id         TEXT PRIMARY KEY,          -- UUID
+  user_id    TEXT NOT NULL,             -- 送信先ユーザー
+  type       TEXT NOT NULL,             -- 'match_found' / 'wish_received' / 'proposal_ready'
+                                        -- / 'confirmation' / 'reminder' / 'review_request'
+  payload    TEXT,                      -- 通知内容（JSON）
+  is_sent    INTEGER DEFAULT 0,         -- 0 = 未送信, 1 = 送信済み
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- インデックス -------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_user_tags_user   ON user_tags(user_id);
 CREATE INDEX IF NOT EXISTS idx_matches_user_a   ON matches(user_a_id);
 CREATE INDEX IF NOT EXISTS idx_matches_user_b   ON matches(user_b_id);
 CREATE INDEX IF NOT EXISTS idx_meetings_match   ON meetings(match_id);
 CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_sent);

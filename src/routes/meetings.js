@@ -1,6 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
+const { enqueueMany, scheduleReviewRequest } = require('./notifications');
 
 const router = express.Router();
 
@@ -51,9 +52,25 @@ router.post('/:id/confirm', (req, res) => {
   }
 
   const updated = db.prepare('SELECT * FROM meetings WHERE id = ?').get(meeting.id);
+  const bothConfirmed = updated.confirmed_a === 1 && updated.confirmed_b === 1;
+  // 直前は未成立で、今回の確認で初めて両者成立した場合のみ通知（重複防止）
+  const wasBothConfirmed = meeting.confirmed_a === 1 && meeting.confirmed_b === 1;
+
+  if (bothConfirmed && !wasBothConfirmed) {
+    const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(updated.match_id);
+    if (match) {
+      const both = [match.user_a_id, match.user_b_id];
+      const payload = { match_id: match.id, meeting_id: updated.id };
+      // 両者へ 'confirmation' 通知
+      enqueueMany(both, 'confirmation', payload);
+      // 60分後に両者へ 'review_request' をスケジュール
+      scheduleReviewRequest(both, payload);
+    }
+  }
+
   res.json({
     ...updated,
-    both_confirmed: updated.confirmed_a === 1 && updated.confirmed_b === 1,
+    both_confirmed: bothConfirmed,
   });
 });
 
@@ -145,6 +162,18 @@ router.post('/wishes', (req, res) => {
       both_submitted: true,
     };
   })();
+
+  // 今回の提出で初めて両者が揃った場合のみ、両者へ 'proposal_ready' 通知
+  const wasBothSubmitted = !!meeting.wishes_a && !!meeting.wishes_b;
+  if (result.both_submitted && !wasBothSubmitted) {
+    enqueueMany([match.user_a_id, match.user_b_id], 'proposal_ready', {
+      match_id,
+      meeting_id: result.id,
+      status: result.status,
+      proposed_time: result.proposed_time,
+      proposed_place: result.proposed_place,
+    });
+  }
 
   res.status(201).json(result);
 });
