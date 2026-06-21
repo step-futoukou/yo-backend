@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS meetings (
   place          TEXT,                   -- 場所
   confirmed_a    INTEGER DEFAULT 0,      -- 0 or 1
   confirmed_b    INTEGER DEFAULT 0,      -- 0 or 1
+  wishes_a       TEXT,                   -- ユーザーAの希望（JSON: {time_slots:[], places:[]}）
+  wishes_b       TEXT,                   -- ユーザーBの希望（JSON: {time_slots:[], places:[]}）
+  proposed_time  TEXT,                   -- 自動提案された時間
+  proposed_place TEXT,                   -- 自動提案された場所
+  status         TEXT DEFAULT 'waiting', -- 'waiting' / 'proposed' / 'no_match'
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
 );

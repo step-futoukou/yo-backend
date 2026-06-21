@@ -57,6 +57,129 @@ router.post('/:id/confirm', (req, res) => {
   });
 });
 
+// ============================================================
+// 待ち合わせ希望の重複検出
+// ============================================================
+
+// 2つの配列の「最初の重複要素」を返す（A の並び順を優先）。なければ null。
+function firstOverlap(arrA, arrB) {
+  const setB = new Set((Array.isArray(arrB) ? arrB : []).map((x) => String(x)));
+  for (const x of (Array.isArray(arrA) ? arrA : [])) {
+    if (setB.has(String(x))) return x;
+  }
+  return null;
+}
+
+// match に紐づく待ち合わせを取得（最新1件）。無ければ新規作成して返す。
+function findOrCreateMeeting(matchId) {
+  const existing = db.prepare(
+    'SELECT * FROM meetings WHERE match_id = ? ORDER BY created_at DESC LIMIT 1'
+  ).get(matchId);
+  if (existing) return existing;
+
+  const id = uuidv4();
+  db.prepare('INSERT INTO meetings (id, match_id) VALUES (?, ?)').run(id, matchId);
+  return db.prepare('SELECT * FROM meetings WHERE id = ?').get(id);
+}
+
+/**
+ * POST /api/meetings/wishes
+ * ユーザーの希望（時間・場所）を登録する。
+ * 両者の希望が揃ったら自動で重複を検出し、proposed_time / proposed_place を設定。
+ * 重複が一切なければ status = 'no_match'。
+ * body: { match_id, user_id, time_slots: [], places: [] }
+ */
+router.post('/wishes', (req, res) => {
+  const { match_id, user_id, time_slots, places } = req.body || {};
+  if (!match_id || !user_id) {
+    return res.status(400).json({ error: 'match_id and user_id are required' });
+  }
+
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(match_id);
+  if (!match) return res.status(404).json({ error: 'match not found' });
+
+  // user_id がマッチのどちら側かを判定
+  let side;
+  if (user_id === match.user_a_id) side = 'a';
+  else if (user_id === match.user_b_id) side = 'b';
+  else return res.status(400).json({ error: 'user_id is not part of this match' });
+
+  const wish = {
+    time_slots: Array.isArray(time_slots) ? time_slots : [],
+    places: Array.isArray(places) ? places : [],
+  };
+
+  const meeting = findOrCreateMeeting(match_id);
+
+  const result = db.transaction(() => {
+    // 自分側の希望を保存
+    const col = side === 'a' ? 'wishes_a' : 'wishes_b';
+    db.prepare(`UPDATE meetings SET ${col} = ? WHERE id = ?`)
+      .run(JSON.stringify(wish), meeting.id);
+
+    const m = db.prepare('SELECT * FROM meetings WHERE id = ?').get(meeting.id);
+
+    // 両者が揃っていなければ waiting のまま
+    if (!m.wishes_a || !m.wishes_b) {
+      return { ...m, both_submitted: false };
+    }
+
+    // 重複検出
+    const wa = JSON.parse(m.wishes_a);
+    const wb = JSON.parse(m.wishes_b);
+    const proposedTime = firstOverlap(wa.time_slots, wb.time_slots);
+    const proposedPlace = firstOverlap(wa.places, wb.places);
+
+    if (proposedTime === null && proposedPlace === null) {
+      db.prepare("UPDATE meetings SET status = 'no_match' WHERE id = ?").run(m.id);
+    } else {
+      db.prepare(`
+        UPDATE meetings
+          SET proposed_time = ?, proposed_place = ?, status = 'proposed'
+          WHERE id = ?
+      `).run(proposedTime, proposedPlace, m.id);
+    }
+
+    return {
+      ...db.prepare('SELECT * FROM meetings WHERE id = ?').get(m.id),
+      both_submitted: true,
+    };
+  })();
+
+  res.status(201).json(result);
+});
+
+/**
+ * GET /api/meetings/:match_id/proposal
+ * 自動提案された時間・場所を返す。両者未回答なら waiting。
+ */
+router.get('/:match_id/proposal', (req, res) => {
+  const meeting = db.prepare(
+    'SELECT * FROM meetings WHERE match_id = ? ORDER BY created_at DESC LIMIT 1'
+  ).get(req.params.match_id);
+
+  // 待ち合わせ未作成、または両者の希望が揃っていない → waiting
+  if (!meeting || !meeting.wishes_a || !meeting.wishes_b) {
+    return res.json({
+      status: 'waiting',
+      match_id: req.params.match_id,
+      proposed_time: null,
+      proposed_place: null,
+      waiting_for: meeting
+        ? [!meeting.wishes_a ? 'a' : null, !meeting.wishes_b ? 'b' : null].filter(Boolean)
+        : ['a', 'b'],
+    });
+  }
+
+  res.json({
+    status: meeting.status, // 'proposed' or 'no_match'
+    match_id: req.params.match_id,
+    meeting_id: meeting.id,
+    proposed_time: meeting.proposed_time,
+    proposed_place: meeting.proposed_place,
+  });
+});
+
 /**
  * GET /api/meetings/match/:matchId
  * マッチに紐づく待ち合わせ一覧。
