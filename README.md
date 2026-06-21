@@ -165,6 +165,17 @@ curl -X POST http://localhost:3000/api/users \
 ### `GET /api/matching/user/:userId`
 指定ユーザーが関わる全マッチを新しい順で取得。
 
+### `GET /api/matching/rematch/:user_id`
+未再マッチの「縁をつなぐ」候補を好相性順（`score_signal` 降順）で返す。
+各要素に相手を示す `other_user_id` を付与。
+```json
+[
+  { "id": "…", "user_a_id": "…", "user_b_id": "…",
+    "score_signal": 10, "triggered_at": "…", "rematched_at": null,
+    "other_user_id": "…" }
+]
+```
+
 ### `GET /api/matching/:id`
 マッチを1件取得。`404` if not found.
 
@@ -325,6 +336,18 @@ review_count += 1
 
 > 学習したウェイトは `POST /api/matching/find` のスコア計算に反映される（下記「マッチングスコア仕様」参照）。
 
+### 縁をつなぐ（再マッチング）
+
+同じ `match_id` で**両者のレビューが揃った**とき、好相性シグナルを計算する。
+```
+score_signal = (talk_a + talk_b) / 2 + (10 - |ei_adjust_a - ei_adjust_b|) × 0.5
+```
+`score_signal >= 7.0` なら `rematch_candidates` に登録（同じペアが既登録ならスキップ）。
+
+登録された相手は `POST /api/matching/find` で**通常候補より優先**して再マッチされる。
+再マッチが発生すると `rematched_at` が記録され、**両者に `match_found`**（`payload.rematch = true`）が送られる。
+再マッチは過去に成立（accepted）した相手を意図的に再提案するため、accepted は除外しない（現在 pending の重複提案のみ回避）。
+
 ---
 
 ## 通知 API
@@ -432,6 +455,7 @@ relationScore = 20（固定）
 | `notifications` | 通知キュー（`scheduled_at` で遅延配信に対応） |
 | `reviews` | 待ち合わせ後のレビュー |
 | `user_weights` | ユーザーごとの学習済みマッチングウェイト |
+| `rematch_candidates` | 縁をつなぐ（再マッチング）候補 |
 
 スキーマ定義: [`src/db/schema.sql`](src/db/schema.sql)
 

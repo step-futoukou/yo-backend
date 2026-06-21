@@ -167,6 +167,56 @@ router.post('/find', (req, res) => {
   // 検索元ユーザーの学習済みウェイトでスコアを調整
   const meWeights = getWeights(user_id);
 
+  // === 1) 縁をつなぐ: rematch_candidates を最優先で使う ===
+  const rematchRows = db.prepare(`
+    SELECT * FROM rematch_candidates
+      WHERE (user_a_id = ? OR user_b_id = ?) AND rematched_at IS NULL
+      ORDER BY score_signal DESC, triggered_at ASC
+  `).all(user_id, user_id);
+
+  for (const rc of rematchRows) {
+    const otherId = rc.user_a_id === user_id ? rc.user_b_id : rc.user_a_id;
+    if (isBlacklisted(otherId)) continue;
+
+    // 再マッチは過去の相手を意図的に再提案するため accepted は除外しない。
+    // ただし現在 pending（未応答）のマッチが既にある相手は二重提案を避けてスキップ。
+    const activePending = db.prepare(`
+      SELECT 1 FROM matches
+        WHERE status = 'pending'
+          AND ((user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?))
+    `).get(user_id, otherId, otherId, user_id);
+    if (activePending) continue;
+
+    const other = getUserWithTags(otherId);
+    if (!other) continue;
+    const score = calcScore(me, other, meWeights);
+    if (score === null) continue; // 関係値の差3以上は対象外
+
+    const matchId = uuidv4();
+    db.prepare(`
+      INSERT INTO matches (id, user_a_id, user_b_id, score, status)
+      VALUES (?, ?, ?, ?, 'pending')
+    `).run(matchId, user_id, otherId, score);
+    db.prepare('UPDATE rematch_candidates SET rematched_at = CURRENT_TIMESTAMP WHERE id = ?').run(rc.id);
+
+    // 再マッチは両者へ 'match_found' を送る
+    enqueue(user_id, 'match_found', { match_id: matchId, from_user_id: otherId, score, rematch: true });
+    enqueue(otherId, 'match_found', { match_id: matchId, from_user_id: user_id, score, rematch: true });
+
+    return res.status(201).json({
+      match: db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId),
+      rematch: true,
+      candidates: [{
+        user_id: otherId,
+        faculty: other.faculty,
+        grade: other.grade,
+        score,
+        score_signal: rc.score_signal,
+      }],
+    });
+  }
+
+  // === 2) 通常のスコア計算による新規候補 ===
   const candidates = db.prepare('SELECT id FROM users').all()
     .map((r) => r.id)
     .filter((id) => !excluded.has(id) && !isBlacklisted(id))
@@ -198,6 +248,7 @@ router.post('/find', (req, res) => {
 
   res.status(201).json({
     match: db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId),
+    rematch: false,
     candidates: top.map((c) => ({
       user_id: c.user.id,
       faculty: c.user.faculty,
@@ -205,6 +256,23 @@ router.post('/find', (req, res) => {
       score: c.score,
     })),
   });
+});
+
+/**
+ * GET /api/matching/rematch/:user_id
+ * 未再マッチの縁をつなぐ候補を好相性順に返す。
+ */
+router.get('/rematch/:user_id', (req, res) => {
+  const uid = req.params.user_id;
+  const rows = db.prepare(`
+    SELECT * FROM rematch_candidates
+      WHERE (user_a_id = ? OR user_b_id = ?) AND rematched_at IS NULL
+      ORDER BY score_signal DESC, triggered_at ASC
+  `).all(uid, uid);
+  res.json(rows.map((r) => ({
+    ...r,
+    other_user_id: r.user_a_id === uid ? r.user_b_id : r.user_a_id,
+  })));
 });
 
 /**

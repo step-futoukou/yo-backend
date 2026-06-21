@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS user_weights (
   updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 再マッチング候補（縁をつなぐ） -------------------------------
+CREATE TABLE IF NOT EXISTS rematch_candidates (
+  id           TEXT PRIMARY KEY,        -- UUID
+  user_a_id    TEXT NOT NULL,
+  user_b_id    TEXT NOT NULL,
+  score_signal REAL,                    -- 好相性スコア（高いほど再マッチ優先）
+  triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  rematched_at DATETIME                 -- 実際に再マッチした日時（NULL = 未再マッチ）
+);
+
 -- インデックス -------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_user_tags_user   ON user_tags(user_id);
 CREATE INDEX IF NOT EXISTS idx_matches_user_a   ON matches(user_a_id);
@@ -123,3 +133,5 @@ CREATE INDEX IF NOT EXISTS idx_meetings_match   ON meetings(match_id);
 CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_sent);
 CREATE INDEX IF NOT EXISTS idx_reviews_user ON reviews(user_id);
+CREATE INDEX IF NOT EXISTS idx_rematch_a ON rematch_candidates(user_a_id);
+CREATE INDEX IF NOT EXISTS idx_rematch_b ON rematch_candidates(user_b_id);

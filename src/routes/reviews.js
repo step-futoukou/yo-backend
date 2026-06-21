@@ -16,6 +16,9 @@ const DEFAULT_WEIGHTS = {
 const WEIGHT_MIN = 20;
 const WEIGHT_MAX = 60;
 
+// この値以上の好相性シグナルで再マッチ候補に登録する
+const REMATCH_THRESHOLD = 7.0;
+
 function safeParse(json, fallback = null) {
   if (!json) return fallback;
   try { return JSON.parse(json); } catch { return json; }
@@ -35,6 +38,52 @@ function getWeights(userId) {
   const row = db.prepare('SELECT * FROM user_weights WHERE user_id = ?').get(userId);
   if (row) return row;
   return { user_id: userId, ...DEFAULT_WEIGHTS, updated_at: null };
+}
+
+/**
+ * 両者のレビューが揃ったとき、好相性なら rematch_candidates へ登録する。
+ * score_signal = (talk_a + talk_b)/2 + (10 - |ei_a - ei_b|) × 0.5
+ * @returns { registered, score_signal, reason }（match未確定/片側のみなら null）
+ */
+function maybeRegisterRematch(matchId) {
+  if (!matchId) return null;
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+  if (!match) return null;
+
+  // 各ユーザーの最新レビューを取得
+  const ra = db.prepare(
+    'SELECT * FROM reviews WHERE match_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+  ).get(matchId, match.user_a_id);
+  const rb = db.prepare(
+    'SELECT * FROM reviews WHERE match_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+  ).get(matchId, match.user_b_id);
+
+  // 片側のみ（=まだ2件揃っていない）なら何もしない
+  if (!ra || !rb) return { registered: false, reason: 'waiting_for_both' };
+
+  const signal = (ra.talk_score + rb.talk_score) / 2
+    + (10 - Math.abs(ra.ei_adjust - rb.ei_adjust)) * 0.5;
+
+  if (signal < REMATCH_THRESHOLD) {
+    return { registered: false, score_signal: signal, reason: 'below_threshold' };
+  }
+
+  // すでに登録済み（順不同）ならスキップ
+  const existing = db.prepare(`
+    SELECT 1 FROM rematch_candidates
+      WHERE (user_a_id = ? AND user_b_id = ?)
+         OR (user_a_id = ? AND user_b_id = ?)
+  `).get(match.user_a_id, match.user_b_id, match.user_b_id, match.user_a_id);
+  if (existing) {
+    return { registered: false, score_signal: signal, reason: 'already_registered' };
+  }
+
+  db.prepare(`
+    INSERT INTO rematch_candidates (id, user_a_id, user_b_id, score_signal)
+    VALUES (?, ?, ?, ?)
+  `).run(uuidv4(), match.user_a_id, match.user_b_id, signal);
+
+  return { registered: true, score_signal: signal };
 }
 
 /**
@@ -99,17 +148,22 @@ router.post('/', (req, res) => {
         updated_at   = CURRENT_TIMESTAMP
     `).run(user_id, mbtiW, hobbyW, eiPref, hobbyPref, reviewCount);
 
+    // 両者のレビューが揃ったら再マッチ候補を判定・登録
+    const rematch = maybeRegisterRematch(match_id ?? null);
+
     return {
       review: db.prepare('SELECT * FROM reviews WHERE id = ?').get(reviewId),
       weights: getWeights(user_id),
+      rematch,
     };
   });
 
-  const { review, weights } = tx();
+  const { review, weights, rematch } = tx();
   res.status(201).json({
     ...review,
     atmos_tags: safeParse(review.atmos_tags, []),
     weights,
+    rematch,
   });
 });
 
