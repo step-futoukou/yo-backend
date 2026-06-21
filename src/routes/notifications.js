@@ -65,23 +65,25 @@ function enqueueReviewRequest(userIds, payload = {}) {
 }
 
 /**
- * 未送信かつ scheduled_at が過去（配信時刻を過ぎた）review_request を
- * 送信済み（is_sent = 1）にするスイープ処理。
- * @returns 送信済みにした件数
+ * スイープ処理（B案: クライアント駆動配信）。
+ * scheduled_at を過ぎた review_request は「配信可能」になったとみなすだけで、
+ * is_sent は 0 のまま変更しない（実際の配信＝is_sent=1 化は GET 時に行う）。
+ * これにより「ユーザーが GET した瞬間に受け取る」ことが保証される。
+ * ここでは観測用に配信可能件数を返すのみ。
+ * @returns 配信可能（未送信・期限到来）になっている review_request 件数
  */
 function sweepReviewRequests() {
-  const res = db.prepare(`
-    UPDATE notifications
-      SET is_sent = 1
+  const { c } = db.prepare(`
+    SELECT COUNT(*) AS c FROM notifications
       WHERE type = 'review_request'
         AND is_sent = 0
         AND scheduled_at IS NOT NULL
         AND scheduled_at <= datetime('now')
-  `).run();
-  if (res.changes > 0) {
-    console.log(`[notifications] swept ${res.changes} due review_request(s)`);
+  `).get();
+  if (c > 0) {
+    console.log(`[notifications] ${c} review_request(s) deliverable (awaiting client GET)`);
   }
-  return res.changes;
+  return c;
 }
 
 /**

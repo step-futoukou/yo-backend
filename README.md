@@ -275,7 +275,7 @@ curl -X POST http://localhost:3000/api/users \
 | `match_found` | `POST /api/matching/find` でマッチ成立 | マッチ相手 |
 | `proposal_ready` | `POST /api/meetings/wishes` で両者の希望が揃った | 両者 |
 | `confirmation` | `POST /api/meetings/:id/confirm` で両者確認完了 | 両者 |
-| `review_request` | 両者確認完了の **60分後**（`scheduled_at` 経過後にスイープで送信） | 両者 |
+| `review_request` | 両者確認完了の **60分後**（`scheduled_at` 経過後、最初の `GET` で配信） | 両者 |
 | `reminder` | `POST /api/notifications/reminder` で手動追加 | 指定ユーザー |
 | `wish_received` | （予約。現状は自動発火なし） | — |
 
