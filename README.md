@@ -264,6 +264,50 @@ curl -X POST http://localhost:3000/api/users \
 
 ---
 
+## 通知 API
+
+通知はキューに蓄積され、クライアントが `GET` で取得（プル）すると送信済みになる方式。
+
+### 通知の種別（`type`）
+
+| type | 発火タイミング | 宛先 |
+|---|---|---|
+| `match_found` | `POST /api/matching/find` でマッチ成立 | マッチ相手 |
+| `proposal_ready` | `POST /api/meetings/wishes` で両者の希望が揃った | 両者 |
+| `confirmation` | `POST /api/meetings/:id/confirm` で両者確認完了 | 両者 |
+| `review_request` | 両者確認完了の **60分後**（`scheduled_at` 経過後にスイープで送信） | 両者 |
+| `reminder` | `POST /api/notifications/reminder` で手動追加 | 指定ユーザー |
+| `wish_received` | （予約。現状は自動発火なし） | — |
+
+### `GET /api/notifications/:user_id`
+指定ユーザー宛ての**未送信通知**を返し、返した通知を `is_sent = 1` に更新する。
+`scheduled_at` が未来の通知（配信予定の `review_request` など）は対象外。
+
+**Response** `200`
+```json
+[
+  {
+    "id": "…",
+    "user_id": "…",
+    "type": "match_found",
+    "payload": { "match_id": "…", "from_user_id": "…", "score": 75 },
+    "is_sent": 0,
+    "scheduled_at": null,
+    "created_at": "2026-06-21 13:22:50"
+  }
+]
+```
+未送信が無ければ `[]`。`payload` はパース済みオブジェクトで返却。
+
+### `POST /api/notifications/reminder`
+再通知（リマインダー）をキューに追加する。
+
+**Request Body**: `{ "match_id", "user_id" }`（`user_id` 必須）
+
+**Response** `201`: 追加された通知。
+
+---
+
 ## マッチングスコア仕様（合計100点）
 
 ### MBTIスコア（40点・各軸10点）
@@ -314,6 +358,7 @@ curl -X POST http://localhost:3000/api/users \
 | `meetings` | 待ち合わせ（希望・自動提案・確定状態） |
 | `reports` | 通報 |
 | `blacklist` | ブラックリスト |
+| `notifications` | 通知キュー（`scheduled_at` で遅延配信に対応） |
 
 スキーマ定義: [`src/db/schema.sql`](src/db/schema.sql)
 
@@ -328,7 +373,8 @@ yo-backend/
 │   ├── routes/
 │   │   ├── users.js         # ユーザー登録・取得
 │   │   ├── matching.js      # マッチング（スコア算出）
-│   │   └── meetings.js      # 待ち合わせ・希望重複検出・通報
+│   │   ├── meetings.js      # 待ち合わせ・希望重複検出・通報
+│   │   └── notifications.js # 通知キュー・スイープ処理
 │   └── app.js               # Expressアプリ本体
 ├── .env
 └── server.js                # エントリーポイント
