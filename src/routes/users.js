@@ -1,6 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
+const { getWeights } = require('./reviews');
 
 const router = express.Router();
 
@@ -90,6 +91,14 @@ router.post('/', (req, res) => {
 
   const user = getUserWithTags(id);
   res.status(existing ? 200 : 201).json(user);
+});
+
+/**
+ * GET /api/users/:id/weights
+ * ユーザーの学習済みウェイトを返す（未作成ならデフォルト値）。
+ */
+router.get('/:id/weights', (req, res) => {
+  res.json(getWeights(req.params.id));
 });
 
 /**

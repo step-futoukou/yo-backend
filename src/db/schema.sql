@@ -91,6 +91,30 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- レビュー -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS reviews (
+  id            TEXT PRIMARY KEY,        -- UUID
+  user_id       TEXT NOT NULL,           -- レビューした人
+  match_id      TEXT,                    -- 対象マッチ
+  talk_score    INTEGER,                 -- 会話の満足度 1〜5
+  mission_score INTEGER,                 -- ミッション達成度 1〜5
+  ei_adjust     INTEGER,                 -- 静かな人好き(1)↔よく話す人好き(5)
+  hobby_adjust  INTEGER,                 -- 趣味違っていい(1)↔共通点大事(5)
+  atmos_tags    TEXT,                    -- 雰囲気タグ（JSON）
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ユーザーごとの学習済みウェイト -------------------------------
+CREATE TABLE IF NOT EXISTS user_weights (
+  user_id      TEXT PRIMARY KEY,
+  mbti_weight  INTEGER DEFAULT 40,       -- MBTI配点ウェイト 20〜60
+  hobby_weight INTEGER DEFAULT 40,       -- 趣味配点ウェイト 20〜60
+  ei_pref      REAL DEFAULT 50,          -- E/I 嗜好 0〜100
+  hobby_pref   REAL DEFAULT 50,          -- 共通点重視度 0〜100
+  review_count INTEGER DEFAULT 0,
+  updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- インデックス -------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_user_tags_user   ON user_tags(user_id);
 CREATE INDEX IF NOT EXISTS idx_matches_user_a   ON matches(user_a_id);
@@ -98,3 +122,4 @@ CREATE INDEX IF NOT EXISTS idx_matches_user_b   ON matches(user_b_id);
 CREATE INDEX IF NOT EXISTS idx_meetings_match   ON meetings(match_id);
 CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_sent);
+CREATE INDEX IF NOT EXISTS idx_reviews_user ON reviews(user_id);

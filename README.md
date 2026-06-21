@@ -110,6 +110,20 @@ curl -X POST http://localhost:3000/api/users \
 ### `GET /api/users/device/:deviceId`
 端末IDでユーザーを取得（アプリ起動時の復元用）。`404` if not found.
 
+### `GET /api/users/:id/weights`
+ユーザーの学習済みウェイトを返す（未作成ならデフォルト値）。
+```json
+{
+  "user_id": "…",
+  "mbti_weight": 40,
+  "hobby_weight": 40,
+  "ei_pref": 50,
+  "hobby_pref": 50,
+  "review_count": 0,
+  "updated_at": null
+}
+```
+
 ---
 
 ## マッチング API
@@ -264,6 +278,55 @@ curl -X POST http://localhost:3000/api/users \
 
 ---
 
+## レビュー API
+
+待ち合わせ後のフィードバックを記録し、ユーザーごとのマッチングウェイトを学習する。
+
+### `POST /api/reviews`
+レビューを保存し、`user_weights` を更新する。
+
+**Request Body**
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `user_id` | string | ✅ | レビューした人 |
+| `match_id` | string | | 対象マッチ |
+| `talk_score` | integer | | 会話の満足度 1〜5 |
+| `mission_score` | integer | | ミッション達成度 1〜5 |
+| `ei_adjust` | integer | | 静かな人好き(1)↔よく話す人好き(5) |
+| `hobby_adjust` | integer | | 趣味違っていい(1)↔共通点大事(5) |
+| `atmos_tags` | array | | 雰囲気タグ |
+
+**ウェイト更新ロジック**
+```
+ei_pref    = 現在値 × 0.7 + (ei_adjust    × 20) × 0.3
+hobby_pref = 現在値 × 0.7 + (hobby_adjust × 20) × 0.3
+talk_score   >= 4 → mbti_weight  +1（上限60）
+talk_score   <= 2 → mbti_weight  -1（下限20）
+hobby_adjust >= 4 → hobby_weight +1（上限60）
+hobby_adjust <= 2 → hobby_weight -1（下限20）
+review_count += 1
+```
+
+**Response** `201`: 保存したレビュー + 更新後の `weights`
+```json
+{
+  "id": "…",
+  "user_id": "…",
+  "talk_score": 5,
+  "hobby_adjust": 5,
+  "atmos_tags": ["楽しい", "落ち着く"],
+  "weights": {
+    "mbti_weight": 41, "hobby_weight": 41,
+    "ei_pref": 59, "hobby_pref": 65, "review_count": 1
+  }
+}
+```
+
+> 学習したウェイトは `POST /api/matching/find` のスコア計算に反映される（下記「マッチングスコア仕様」参照）。
+
+---
+
 ## 通知 API
 
 通知はキューに蓄積され、クライアントが `GET` で取得（プル）すると送信済みになる方式。
@@ -334,16 +397,24 @@ curl -X POST http://localhost:3000/api/users \
 
 合計の上限は40点。
 
-### 求める関係値の近さ（20点）
+### 求める関係値の近さ
 
-`relation_value`（1〜5）の差で加点。
+`relation_value`（1〜5）の差が **3以上のペアはマッチング対象外（除外）**。
+マッチ可能なペアの関係スコアは **20点固定**。
 
-| 差 | 配点 |
-|---|---|
-| 0 | 20点 |
-| 1 | 14点 |
-| 2 | 6点 |
-| 3以上 | **マッチング対象外（除外）** |
+### ウェイトによる調整（学習）
+
+検索元ユーザーの `user_weights`（レビューで学習）を用いて、MBTI・趣味の配点を調整する。
+
+```
+mbtiScore     = (素のMBTI値  / 40) × mbti_weight    （mbti_weight  既定40, 20〜60）
+hobbyScore    = (素の趣味値  / 40) × hobby_weight   （hobby_weight 既定40, 20〜60）
+relationScore = 20（固定）
+合計 = mbtiScore + hobbyScore + relationScore（上限100）
+```
+
+既定ウェイト（40/40）では従来どおり「MBTI最大40 + 趣味最大40 + 関係20」と一致する。
+レビューを重ねるほど、そのユーザーが重視する軸の配点が増減する。
 
 ---
 
@@ -359,6 +430,8 @@ curl -X POST http://localhost:3000/api/users \
 | `reports` | 通報 |
 | `blacklist` | ブラックリスト |
 | `notifications` | 通知キュー（`scheduled_at` で遅延配信に対応） |
+| `reviews` | 待ち合わせ後のレビュー |
+| `user_weights` | ユーザーごとの学習済みマッチングウェイト |
 
 スキーマ定義: [`src/db/schema.sql`](src/db/schema.sql)
 
@@ -374,7 +447,8 @@ yo-backend/
 │   │   ├── users.js         # ユーザー登録・取得
 │   │   ├── matching.js      # マッチング（スコア算出）
 │   │   ├── meetings.js      # 待ち合わせ・希望重複検出・通報
-│   │   └── notifications.js # 通知キュー・スイープ処理
+│   │   ├── notifications.js # 通知キュー・スイープ処理
+│   │   └── reviews.js       # レビュー・ウェイト学習
 │   └── app.js               # Expressアプリ本体
 ├── .env
 └── server.js                # エントリーポイント

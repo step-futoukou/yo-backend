@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
 const { getUserWithTags } = require('./users');
 const { enqueue } = require('./notifications');
+const { getWeights } = require('./reviews');
 
 const router = express.Router();
 
@@ -108,18 +109,29 @@ function relationScore(a, b) {
 /**
  * 2ユーザー間の相性スコアを 0〜100 で算出する。
  * 関係値の差が3以上のペアはマッチング対象外として null を返す。
- * 内訳:
- *  - MBTI       : 40点（E/I・N/S・T/F・J/P 各10点）
- *  - 趣味×興味  : 40点（上限）
- *  - 関係値の近さ: 20点
+ *
+ * weights（検索元ユーザーの学習済みウェイト）でMBTI/趣味の配点を調整する:
+ *   mbtiScore     = (素のMBTI値 / 40) × mbti_weight
+ *   hobbyScore    = (素の趣味値 / 40) × hobby_weight
+ *   relationScore = 20点固定
+ *   合計（上限100）
  */
-function calcScore(a, b) {
+function calcScore(a, b, weights = {}) {
   const rel = relationScore(a, b);
-  if (rel === null) return null; // マッチング対象外
+  if (rel === null) return null; // マッチング対象外（関係値の差3以上）
 
-  const mbti = scoreEI(a, b) + scoreNS(a, b) + scoreTF(a, b) + scoreJP(a, b);
-  const tags = tagScore(a, b);
-  return mbti + tags + rel;
+  const rawMbti = scoreEI(a, b) + scoreNS(a, b) + scoreTF(a, b) + scoreJP(a, b); // 0〜40
+  const rawHobby = tagScore(a, b); // 0〜40
+
+  const mbtiWeight = weights.mbti_weight ?? 40;
+  const hobbyWeight = weights.hobby_weight ?? 40;
+
+  const mbtiScore = (rawMbti / 40) * mbtiWeight;
+  const hobbyScore = (rawHobby / 40) * hobbyWeight;
+  const relationScoreFixed = 20;
+
+  const total = mbtiScore + hobbyScore + relationScoreFixed;
+  return Math.min(100, Math.round(total));
 }
 
 // gender_pref を尊重した相手候補かどうか（性別情報は未保持のため pref のみ簡易判定）
@@ -152,11 +164,14 @@ router.post('/find', (req, res) => {
   `).all(user_id, user_id).map((r) => r.other);
   const excluded = new Set([user_id, ...tied]);
 
+  // 検索元ユーザーの学習済みウェイトでスコアを調整
+  const meWeights = getWeights(user_id);
+
   const candidates = db.prepare('SELECT id FROM users').all()
     .map((r) => r.id)
     .filter((id) => !excluded.has(id) && !isBlacklisted(id))
     .map((id) => getUserWithTags(id))
-    .map((u) => ({ user: u, score: calcScore(me, u) }))
+    .map((u) => ({ user: u, score: calcScore(me, u, meWeights) }))
     .filter((c) => c.score !== null) // 関係値の差が3以上は除外
     .sort((x, y) => y.score - x.score);
 
