@@ -94,6 +94,58 @@ router.post('/', (req, res) => {
 });
 
 /**
+ * PUT /api/users/:id
+ * プロフィール更新（MBTI4軸・gender_pref・タグの入れ替え）。
+ * relation_value はUIから廃止した内部固定値なのでここでは更新しない。
+ * body: { faculty, grade, mbti_ei, mbti_ns, mbti_tf, mbti_jp, gender_pref, tags:[{name,type}] }
+ */
+router.put('/:id', (req, res) => {
+  const id = req.params.id;
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'user not found' });
+
+  const { faculty, grade, mbti_ei, mbti_ns, mbti_tf, mbti_jp, gender_pref, tags } = req.body || {};
+  const pref = gender_pref === 'same' ? 'same'
+    : gender_pref === 'any' ? 'any'
+    : existing.gender_pref;
+
+  const update = db.transaction(() => {
+    db.prepare(`
+      UPDATE users SET
+        faculty = ?, grade = ?,
+        mbti_ei = ?, mbti_ns = ?, mbti_tf = ?, mbti_jp = ?,
+        gender_pref = ?
+      WHERE id = ?
+    `).run(
+      faculty ?? existing.faculty,
+      grade ?? existing.grade,
+      clampMbti(mbti_ei, existing.mbti_ei),
+      clampMbti(mbti_ns, existing.mbti_ns),
+      clampMbti(mbti_tf, existing.mbti_tf),
+      clampMbti(mbti_jp, existing.mbti_jp),
+      pref,
+      id,
+    );
+
+    // タグを入れ替え（マッチングの共通点・スコアに反映される）
+    if (Array.isArray(tags)) {
+      db.prepare('DELETE FROM user_tags WHERE user_id = ?').run(id);
+      const insertTag = db.prepare(
+        'INSERT OR IGNORE INTO user_tags (user_id, tag_name, tag_type) VALUES (?, ?, ?)'
+      );
+      for (const t of tags) {
+        if (!t || !t.name) continue;
+        const type = t.type === 'interest' ? 'interest' : 'hobby';
+        insertTag.run(id, String(t.name), type);
+      }
+    }
+  });
+  update();
+
+  res.json(getUserWithTags(id));
+});
+
+/**
  * GET /api/users/:id/weights
  * ユーザーの学習済みウェイトを返す（未作成ならデフォルト値）。
  */
