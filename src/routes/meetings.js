@@ -246,7 +246,17 @@ router.get('/:match_id/status', (req, res) => {
     'SELECT * FROM meetings WHERE match_id = ? ORDER BY created_at DESC LIMIT 1'
   ).get(req.params.match_id);
 
+  // 両ユーザーが選んだタグ名の積集合（上位4件）
+  const aTags = db.prepare('SELECT DISTINCT tag_name FROM user_tags WHERE user_id = ?')
+    .all(match.user_a_id).map((r) => r.tag_name);
+  const bSet = new Set(
+    db.prepare('SELECT DISTINCT tag_name FROM user_tags WHERE user_id = ?')
+      .all(match.user_b_id).map((r) => r.tag_name)
+  );
+  const commonTags = aTags.filter((t) => bSet.has(t)).slice(0, 4);
+
   res.json({
+    common_tags: commonTags,
     match: {
       id: match.id,
       user_a_id: match.user_a_id,
