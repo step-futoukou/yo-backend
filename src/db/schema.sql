@@ -51,8 +51,10 @@ CREATE TABLE IF NOT EXISTS meetings (
   match_id       TEXT NOT NULL,
   scheduled_time TEXT,                   -- 日時テキスト
   place          TEXT,                   -- 場所
-  confirmed_a    INTEGER DEFAULT 0,      -- 0 or 1
-  confirmed_b    INTEGER DEFAULT 0,      -- 0 or 1
+  confirmed_a    INTEGER DEFAULT 0,      -- 待ち合わせ合意 0 or 1
+  confirmed_b    INTEGER DEFAULT 0,      -- 待ち合わせ合意 0 or 1
+  arrived_a      INTEGER DEFAULT 0,      -- 当日到着 0 or 1
+  arrived_b      INTEGER DEFAULT 0,      -- 当日到着 0 or 1
   wishes_a       TEXT,                   -- ユーザーAの希望（JSON: {time_slots:[], places:[]}）
   wishes_b       TEXT,                   -- ユーザーBの希望（JSON: {time_slots:[], places:[]}）
   proposed_time  TEXT,                   -- 自動提案された時間

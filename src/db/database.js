@@ -21,8 +21,20 @@ function initDb() {
   const schemaPath = path.join(__dirname, 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf8');
   db.exec(schema);
+  migrate();
   seedTags();
   console.log(`[db] initialized at ${dbPath}`);
+}
+
+/**
+ * 既存DB向けの軽量マイグレーション（カラム追加）。
+ * CREATE TABLE IF NOT EXISTS は既存テーブルにカラムを足さないため、
+ * 不足しているカラムだけ ALTER TABLE で追加する。
+ */
+function migrate() {
+  const cols = db.prepare('PRAGMA table_info(meetings)').all().map((c) => c.name);
+  if (!cols.includes('arrived_a')) db.exec('ALTER TABLE meetings ADD COLUMN arrived_a INTEGER DEFAULT 0');
+  if (!cols.includes('arrived_b')) db.exec('ALTER TABLE meetings ADD COLUMN arrived_b INTEGER DEFAULT 0');
 }
 
 /**

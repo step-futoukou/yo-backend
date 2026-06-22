@@ -74,6 +74,30 @@ router.post('/:id/confirm', (req, res) => {
   });
 });
 
+/**
+ * POST /api/meetings/:id/confirm と同様に、当日の「到着」を記録する。
+ * body: { side: 'a' | 'b' }。両者到着で both_arrived。
+ */
+router.post('/:id/arrive', (req, res) => {
+  const { side } = req.body || {};
+  const meeting = db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.id);
+  if (!meeting) return res.status(404).json({ error: 'meeting not found' });
+
+  if (side === 'a') {
+    db.prepare('UPDATE meetings SET arrived_a = 1 WHERE id = ?').run(meeting.id);
+  } else if (side === 'b') {
+    db.prepare('UPDATE meetings SET arrived_b = 1 WHERE id = ?').run(meeting.id);
+  } else {
+    return res.status(400).json({ error: "side must be 'a' or 'b'" });
+  }
+
+  const updated = db.prepare('SELECT * FROM meetings WHERE id = ?').get(meeting.id);
+  res.json({
+    ...updated,
+    both_arrived: updated.arrived_a === 1 && updated.arrived_b === 1,
+  });
+});
+
 // ============================================================
 // 待ち合わせ希望の重複検出
 // ============================================================
@@ -206,6 +230,42 @@ router.get('/:match_id/proposal', (req, res) => {
     meeting_id: meeting.id,
     proposed_time: meeting.proposed_time,
     proposed_place: meeting.proposed_place,
+  });
+});
+
+/**
+ * GET /api/meetings/:match_id/status
+ * 画面復元用に、マッチ＋待ち合わせの進行状態をまとめて返す。
+ * フロントの resolver がこの状態から「今いるべき画面」を決める。
+ */
+router.get('/:match_id/status', (req, res) => {
+  const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(req.params.match_id);
+  if (!match) return res.status(404).json({ error: 'match not found' });
+
+  const meeting = db.prepare(
+    'SELECT * FROM meetings WHERE match_id = ? ORDER BY created_at DESC LIMIT 1'
+  ).get(req.params.match_id);
+
+  res.json({
+    match: {
+      id: match.id,
+      user_a_id: match.user_a_id,
+      user_b_id: match.user_b_id,
+      status: match.status,
+    },
+    meeting: meeting ? {
+      id: meeting.id,
+      // 希望は内容ではなく「送信済みか」だけ返す
+      wishes_a: !!meeting.wishes_a,
+      wishes_b: !!meeting.wishes_b,
+      status: meeting.status,                 // 'waiting' / 'proposed' / 'no_match'
+      proposed_time: meeting.proposed_time,
+      proposed_place: meeting.proposed_place,
+      confirmed_a: meeting.confirmed_a,
+      confirmed_b: meeting.confirmed_b,
+      arrived_a: meeting.arrived_a,
+      arrived_b: meeting.arrived_b,
+    } : null,
   });
 });
 
