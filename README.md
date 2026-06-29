@@ -20,11 +20,45 @@ node server.js
 
 ### 環境変数（`.env`）
 
+`.env.example` をコピーして `.env` を作成してください。
+
 | 変数 | 既定値 | 説明 |
 |---|---|---|
-| `PORT` | `3000` | サーバーのポート |
+| `PORT` | `3000` | サーバーのポート。Render では自動割当（`process.env.PORT` を優先） |
 | `DB_PATH` | `./yo.db` | SQLiteファイルのパス |
+| `CORS_ORIGIN` | `http://localhost:5173` | 許可するフロントのオリジン。カンマ区切りで複数可 |
 | `NODE_ENV` | `development` | 実行環境 |
+
+---
+
+## Render へのデプロイ（Web Service）
+
+このAPIは Render の **Web Service** としてデプロイします（フロントは別リポジトリの Static Site）。
+
+1. Render ダッシュボードで **New + → Web Service** を選び、`yo-backend` リポジトリを接続。
+2. 設定:
+   - **Runtime**: Node
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Instance Type**: Free
+3. **Environment Variables** に以下を設定:
+
+   | Key | Value（例） | 備考 |
+   |---|---|---|
+   | `CORS_ORIGIN` | `https://yo-frontend.onrender.com` | フロントの公開URL。複数はカンマ区切り |
+   | `NODE_ENV` | `production` | |
+   | `DB_PATH` | （任意）`./yo.db` | 省略可 |
+
+   > `PORT` は Render が自動で渡すため設定不要。
+4. デプロイ後、`https://<service>.onrender.com/health` で `{"status":"ok"}` を確認。
+5. ここで得た公開URLを、フロント（`yo-frontend`）の `VITE_API_BASE_URL` に設定する。
+
+### 注意（無料プランの制約）
+
+- **ディスクは揮発性**: 再起動・再デプロイで `yo.db` はリセットされる（登録データは消える前提）。
+  永続化が必要なら有料の Persistent Disk か外部DBへ移行する。
+- `engines.node` を `24.x` に固定済み（`better-sqlite3` のネイティブビルド対策。ローカルの稼働系列に合わせる）。
+- 無料インスタンスは一定時間アクセスがないとスリープし、復帰に数十秒かかることがある。
 
 ## 共通仕様
 

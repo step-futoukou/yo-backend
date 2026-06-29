@@ -9,8 +9,15 @@ const { router: reviewsRouter } = require('./routes/reviews');
 
 const app = express();
 
+// CORS 許可オリジン。環境変数 CORS_ORIGIN をカンマ区切りで指定（本番は Render で注入）。
+// 未設定時は開発用に Vite の http://localhost:5173 を許可する。
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 // ミドルウェア
-app.use(cors());
+app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
 // ヘルスチェック
